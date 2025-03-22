@@ -75,10 +75,11 @@ def analyze_text(agent, text, column_name):
         Based on your knowledge of contract guidelines and best practices,
         determine if this text adheres to guidelines and represents low risk.
         
-        Respond with only "Yes" if it adheres to guidelines (low risk),
+        First provide a brief 1-2 sentence explanation of your reasoning.
+        Then on a new line, provide only "Yes" if it adheres to guidelines (low risk),
         or "No" if it does not adhere to guidelines (higher risk).
         """,
-        expected_output="Yes or No",
+        expected_output="Brief reasoning followed by Yes or No",
         agent=agent
     )
     
@@ -94,16 +95,36 @@ def analyze_text(agent, text, column_name):
     # Execute the crew
     result = crew.kickoff()
     
-    # Clean the result - extract just Yes or No
+    # Extract reasoning and Yes/No from result
     result_str = str(result).strip()
-    if "yes" in result_str.lower():
-        return "Yes"
+    
+    # Try to find the Yes/No in the result
+    if "yes" in result_str.lower() and "no" not in result_str.lower():
+        decision = "Yes"
+        # Extract reasoning (everything before "Yes")
+        reasoning_parts = result_str.lower().split("yes")
+        reasoning = reasoning_parts[0].strip()
     elif "no" in result_str.lower():
-        return "No"
+        decision = "No"
+        # Extract reasoning (everything before "No")
+        reasoning_parts = result_str.lower().split("no")
+        reasoning = reasoning_parts[0].strip()
     else:
         # Default to No if unclear
+        decision = "No"
+        reasoning = "Unable to determine clearly. Defaulting to No."
         print(f"Warning: Unclear result from agent: '{result_str}'. Defaulting to 'No'")
-        return "No"
+    
+    # Clean up reasoning if it's empty
+    if not reasoning:
+        reasoning = result_str
+    
+    # Capitalize first letter and ensure proper ending
+    reasoning = reasoning.strip().capitalize()
+    if reasoning and reasoning[-1] not in ['.', '!', '?']:
+        reasoning += '.'
+    
+    return decision, reasoning
 
 def process_csv_file(csv_path, text_columns):
     """Process a CSV file and classify the contract risks."""
@@ -122,6 +143,9 @@ def process_csv_file(csv_path, text_columns):
             
         print(f"\nProcessing column: {col}")
         
+        # Create a new column for reasoning
+        reasoning_col = f"{col}_reasoning"
+        
         # Process each text value in the column
         for idx, row in df.iterrows():
             print(f"  Analyzing row {idx+1}/{len(df)}: {col}")
@@ -131,11 +155,20 @@ def process_csv_file(csv_path, text_columns):
             if pd.isna(text_value) or text_value == "":
                 continue
                 
-            # Analyze the text and get Yes/No result
-            result = analyze_text(risk_agent, text_value, col)
+            # Analyze the text and get Yes/No result with reasoning
+            decision, reasoning = analyze_text(risk_agent, text_value, col)
             
             # Update the value in the dataframe
-            df.at[idx, col] = result
+            df.at[idx, col] = decision
+            
+            # Add the reasoning column if it doesn't exist
+            if reasoning_col not in df.columns:
+                # Insert the reasoning column right after the analyzed column
+                col_idx = df.columns.get_loc(col)
+                df.insert(col_idx + 1, reasoning_col, "")
+            
+            # Add the reasoning
+            df.at[idx, reasoning_col] = reasoning
     
     # Return the modified dataframe
     return df
